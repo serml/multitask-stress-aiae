@@ -1,4 +1,9 @@
 datasets:
   studentlife:
     stress_data_path: '/studentlife/EMA/response/Stress'
-    users_chosen: [4, 7, 8, 10, 14, 16, 17, 19, 22, 23, 24, 32, 33, 35, 36, 43, 44, 49, 51, 52, 53, 57, 58, 59]
+    social_data_path: '/studentlife/EMA/response/Social'
+    sleep_data_path: '/studentlife/EMA/response/Sleep'
+    class_data_path: '/studentlife/EMA/response/Class'
+    lab_data_path: '/studentlife/EMA/response/Lab'
+    conversation_data_path: '/studentlife/sensing/conversation'
+    users_chosen: [4, 7, 8, 10, 14, 16, 17, 19, 22, 23, 24, 32, 33, 35, 36, 43, 44, 49, 51, 52, 53, 57, 58]
