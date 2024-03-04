@@ -9,7 +9,7 @@ class StudentLifeDataLoader(DataLoader):
         self.users_chosen = self.config["users_chosen"]
         self.level = level
 
-    def get_stress_data(self, daily_duplicates='mean'):
+    def get_stress_data(self, daily_duplicates='mean', ambient=True):
 
         # get all users with stress responses
         relative_stress_path = self.config["stress_data_path"]
@@ -66,10 +66,47 @@ class StudentLifeDataLoader(DataLoader):
                 # delete the 'hour' and 'resp_time' columns
                 df = df.drop(columns=["hour", "resp_time"])
                 
+                # get weather data
+                if ambient:
+                    weather_data = self.get_weather_data()
+                    df = pd.merge(df, weather_data, how='left', on=['date'])
+
+                # get bigfive data
+                bigfive = self.get_bigfive_data()
+                df['extraversion'] = bigfive[bigfive['uid'] == user_name]['extraversion'].iloc[0]
+                df['agreeableness'] = bigfive[bigfive['uid'] == user_name]['agreeableness'].iloc[0]
+                df['neuroticism'] = bigfive[bigfive['uid'] == user_name]['neuroticism'].iloc[0]
+                df['openness'] = bigfive[bigfive['uid'] == user_name]['openness'].iloc[0]
+                df['conscientiousness'] = bigfive[bigfive['uid'] == user_name]['conscientiousness'].iloc[0]
+
                 # add the data to the dataframe using concat
                 stress_data = pd.concat([stress_data if not stress_data.empty else None, df], ignore_index=True)
         
         return stress_data
+    
+    def get_bigfive_data(self):
+        relative_bigfive_path = self.config["bigfive_data_path"]
+        bigfive = pd.read_csv(os.getcwd() + relative_bigfive_path)
+
+        # from third column, change name of the column to numbers from 1 to 44
+        bigfive.columns = ['uid' , 'type'] + [i for i in range(1, 45)]
+
+        # change cell values from 'Agree a little' to 4
+        for i in range(1, 45):
+            bigfive.loc[bigfive[i] == 'Disagree Strongly', i] = 1
+            bigfive.loc[bigfive[i] == 'Disagree a little', i] = 2
+            bigfive.loc[bigfive[i] == 'Neither agree nor disagree', i] = 3
+            bigfive.loc[bigfive[i].isna(), i] = 3
+            bigfive.loc[bigfive[i] == 'Agree a little', i] = 4
+            bigfive.loc[bigfive[i] == 'Agree strongly', i] = 5
+
+        bigfive['extraversion'] = bigfive[1] - bigfive[6] + bigfive[11] + bigfive[16] - bigfive[21] + bigfive[26] - bigfive[31] + bigfive[36]
+        bigfive['agreeableness'] = - bigfive[2] + bigfive[7] - bigfive[12] + bigfive[17] + bigfive[22] - bigfive[27] + bigfive[32] - bigfive[37] + bigfive[42]
+        bigfive['conscientiousness'] = bigfive[3] - bigfive[8] + bigfive[13] - bigfive[18] - bigfive[23] + bigfive[28] + bigfive[33] + bigfive[38] - bigfive[43]
+        bigfive['neuroticism'] = bigfive[4] - bigfive[9] + bigfive[14] + bigfive[19] - bigfive[24] + bigfive[29] - bigfive[34] + bigfive[39]
+        bigfive['openness'] = bigfive[5] + bigfive[10] + bigfive[15] + bigfive[20] + bigfive[25] + bigfive[30] - bigfive[35] + bigfive[40] - bigfive[41] + bigfive[44]
+
+        return bigfive[bigfive['type'] == 'pre']
     
     # the same as the above, but with sleep data instead
     def get_sleep_data(self):
@@ -123,7 +160,6 @@ class StudentLifeDataLoader(DataLoader):
                 sleep_data = pd.concat([sleep_data if not sleep_data.empty else None, df], ignore_index=True)
         
         return sleep_data
-
 
     # the same that above but with class data
     def get_class_data(self):
@@ -234,8 +270,6 @@ class StudentLifeDataLoader(DataLoader):
         
         return lab_data
 
-
-
     def get_social_data(self):
 
         # get all users with social responses
@@ -289,13 +323,45 @@ class StudentLifeDataLoader(DataLoader):
         return social_data
     
 
+    def get_weather_data(self):
+        relative_weather_path = self.config["weather_data_path"]
+        data = pd.read_csv(os.getcwd() + relative_weather_path)
+        data.set_index('time', inplace=True)
+        data.index = pd.to_datetime(data.index)
+        data['date'] = data.index.date
+        data = data.groupby(['date'], observed=False).agg(environmental_temperature_mean=('temperature_2m (°C)', 'mean'), 
+            environmental_temperature_max=('temperature_2m (°C)', 'max'), 
+            environmental_temperature_min=('temperature_2m (°C)', 'min'), 
+            environmental_humidity_mean=('relativehumidity_2m (%)', 'mean'), 
+            environmental_humidity_max=('relativehumidity_2m (%)', 'max'), 
+            environmental_humidity_min=('relativehumidity_2m (%)', 'min'), 
+            environmental_precipitation=('precipitation (mm)', 'sum'), environmental_cloudcover=('cloudcover (%)', 'mean'))
+
+        # bin ambient temperature to 1-5
+        data['environmental_temperature_mean'] = pd.cut(data['environmental_temperature_mean'], bins=5, labels=False)
+        data['environmental_temperature_max'] = pd.cut(data['environmental_temperature_max'], bins=5, labels=False)
+        data['environmental_temperature_min'] = pd.cut(data['environmental_temperature_min'], bins=5, labels=False)
+
+        # bin ambient humidity to 1-5
+        data['environmental_humidity_mean'] = pd.cut(data['environmental_humidity_mean'], bins=5, labels=False)
+        data['environmental_humidity_max'] = pd.cut(data['environmental_humidity_max'], bins=5, labels=False)
+        data['environmental_humidity_min'] = pd.cut(data['environmental_humidity_min'], bins=5, labels=False)
+
+        # bin ambient precipitation to 1-5
+        data['environmental_precipitation'] = pd.cut(data['environmental_precipitation'], bins=5, labels=False)
+
+        # bin ambient cloudcover to 1-5
+        data['environmental_cloudcover'] = pd.cut(data['environmental_cloudcover'], bins=5, labels=False)
+        return data
+    
+
     def get_conversation_data(self):
         # get all users with conversation responses
         relative_conversation_path = self.config["conversation_data_path"]
         files = os.listdir(os.getcwd() + relative_conversation_path)
 
         # create dataframe to store stress responses of all users, with three columns: user_id, stress_level and response_time
-        conversation_data = pd.DataFrame(columns=["start_timestamp", "end_timestamp"])
+        conversation_data = pd.DataFrame(columns=["user_id", "date", "social_voice_sum", "social_voice_count", "social_voice_mean", "social_voice_max"])
 
         for file in files:
             # get the user name from the filename with the following format: Stress_u16.json
@@ -312,9 +378,23 @@ class StudentLifeDataLoader(DataLoader):
             with open(os.getcwd() + relative_conversation_path + "/" + file) as f:
                 # read csv as dataframe
                 df = pd.read_csv(f)
-                df['user_id'] = user_number
+                
+                df['date'] = pd.to_datetime(df['start_timestamp'], unit='s').dt.date
 
+                
+                df['duration'] = (df[' end_timestamp'] - df['start_timestamp'])
+                
+                #df = df.resample('D').sum(numeric_only=True)
+                df.drop(['start_timestamp', ' end_timestamp'], axis=1, inplace=True)
+                
+                
+
+                df = df.groupby(['date'], observed=False, as_index=False).agg(social_voice_sum=('duration', 'sum'), social_voice_count=('duration', 'count'), social_voice_mean=('duration', 'mean'), social_voice_max=('duration', 'max'))
+
+                #df.drop(['start_timestamp', ' end_timestamp'], axis=1, inplace=True)
                 # add the data to the dataframe using concat
+                df['user_id'] = user_number
+                
                 conversation_data = pd.concat([conversation_data if not conversation_data.empty else None, df], ignore_index=True)
 
         return conversation_data
