@@ -9,7 +9,7 @@ class StudentLifeDataLoader(DataLoader):
         self.users_chosen = self.config["users_chosen"]
         self.level = level
 
-    def get_stress_data(self, daily_duplicates='mean', ambient=True):
+    def get_stress_data(self, daily_duplicates='mean', ambient=True, stress_mapping='median'):
 
         # get all users with stress responses
         relative_stress_path = self.config["stress_data_path"]
@@ -58,9 +58,12 @@ class StudentLifeDataLoader(DataLoader):
                     # create new column name interval that depends on the 'hour' column
                     df['interval'] = df['hour'].apply(lambda x: 1 if x < 12 else 2 if x >= 9 and x < 6 else 3)
 
-                # calculate median value of all the stress levels
-                median_stress = round(df['stress_level'].median())
-                df['stress_level'] = df['stress_level'].apply(lambda x: 1 if x < median_stress else 2 if x == median_stress else 3)
+                if stress_mapping == 'median':
+                    # calculate median value of all the stress levels
+                    median_stress = round(df['stress_level'].median())
+                    df['stress_level'] = df['stress_level'].apply(lambda x: 1 if x < median_stress else 2 if x == median_stress else 3)
+                elif stress_mapping == 'simple':
+                    df['stress_level'] = df['stress_level'].apply(lambda x: 1 if x < 3 else 2 if x == 3 else 3)
                 
 
                 # delete the 'hour' and 'resp_time' columns
@@ -78,6 +81,14 @@ class StudentLifeDataLoader(DataLoader):
                 df['neuroticism'] = bigfive[bigfive['uid'] == user_name]['neuroticism'].iloc[0]
                 df['openness'] = bigfive[bigfive['uid'] == user_name]['openness'].iloc[0]
                 df['conscientiousness'] = bigfive[bigfive['uid'] == user_name]['conscientiousness'].iloc[0]
+
+                # get flourishing data
+                flourishing = self.get_flourishing_data()
+                df['flourishing_score'] = flourishing[flourishing['uid'] == user_name]['flourishing_score'].iloc[0]
+
+                # get loneliness data
+                loneliness = self.get_loneliness_data()
+                df['loneliness_score'] = loneliness[loneliness['uid'] == user_name]['loneliness_score'].iloc[0]
 
                 # add the data to the dataframe using concat
                 stress_data = pd.concat([stress_data if not stress_data.empty else None, df], ignore_index=True)
@@ -107,6 +118,40 @@ class StudentLifeDataLoader(DataLoader):
         bigfive['openness'] = bigfive[5] + bigfive[10] + bigfive[15] + bigfive[20] + bigfive[25] + bigfive[30] - bigfive[35] + bigfive[40] - bigfive[41] + bigfive[44]
 
         return bigfive[bigfive['type'] == 'pre']
+    
+    
+    def get_loneliness_data(self):
+        relative_loneliness_path = self.config["loneliness_data_path"]
+        loneliness = pd.read_csv(os.getcwd() + relative_loneliness_path)
+
+        # from third column, change name of the column to numbers from 1 to 20
+        loneliness.columns = ['uid' , 'type'] + [i for i in range(1, 21)]
+
+        # change cell values from 'Agree a little' to 4
+        for i in range(1, 21):
+            loneliness.loc[loneliness[i] == 'Often', i] = 3
+            loneliness.loc[loneliness[i] == 'Sometimes', i] = 2
+            loneliness.loc[loneliness[i] == 'Rarely', i] = 1
+            loneliness.loc[loneliness[i] == 'Never', i] = 0
+
+        loneliness['loneliness_score'] = loneliness[1] + loneliness[2] + loneliness[3] + loneliness[4] \
+            + loneliness[5] + loneliness[6] + loneliness[7] + loneliness[8] + loneliness[9] + loneliness[10] \
+            + loneliness[11] + loneliness[12] + loneliness[13] + loneliness[14] + loneliness[15] + loneliness[16] \
+            + loneliness[17] + loneliness[18] + loneliness[19] + loneliness[20]
+
+        return loneliness[loneliness['type'] == 'pre']
+    
+    
+    def get_flourishing_data(self):
+        relative_flourishing_path = self.config["flourishing_data_path"]
+        flourishing = pd.read_csv(os.getcwd() + relative_flourishing_path)
+
+        # from third column, change name of the column to numbers from 1 to 8
+        flourishing.columns = ['uid' , 'type'] + [i for i in range(1, 9)]
+
+        flourishing['flourishing_score'] = flourishing[1] - flourishing[2] + flourishing[3] + flourishing[4] + flourishing[5] + flourishing[6] + flourishing[7] + flourishing[8]
+
+        return flourishing[flourishing['type'] == 'pre']
     
     # the same as the above, but with sleep data instead
     def get_sleep_data(self):
@@ -160,6 +205,7 @@ class StudentLifeDataLoader(DataLoader):
                 sleep_data = pd.concat([sleep_data if not sleep_data.empty else None, df], ignore_index=True)
         
         return sleep_data
+
 
     # the same that above but with class data
     def get_class_data(self):
@@ -269,6 +315,7 @@ class StudentLifeDataLoader(DataLoader):
                 lab_data = pd.concat([lab_data if not lab_data.empty else None, df], ignore_index=True)
         
         return lab_data
+
 
     def get_social_data(self):
 

@@ -8,4 +8,6 @@ datasets:
     conversation_data_path: '/studentlife/sensing/conversation'
     weather_data_path: '/studentlife/studentlife_weather_hourly.csv'
     bigfive_data_path: '/studentlife/survey/BigFive.csv'
+    flourishing_data_path: '/studentlife/survey/FlourishingScale.csv'
+    loneliness_data_path: '/studentlife/survey/LonelinessScale.csv'
     users_chosen: [4, 7, 8, 10, 14, 16, 17, 19, 22, 23, 24, 32, 33, 35, 36, 43, 44, 49, 51, 52, 53, 57, 58]
