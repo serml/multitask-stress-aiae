@@ -262,7 +262,7 @@ class StudentLifeDataLoader(DataLoader):
                 df = df.dropna(subset=['hour'])
 
                 # rename the 'duration' column to'sleep_duration'
-                df = df.rename(columns={"hour": "sleep_duration"})
+                df = df.rename(columns={"hour": "individual_sleep_duration"})
 
                 df['date'] = df['resp_time'].dt.date
                 df['hour'] = df['resp_time'].dt.hour
@@ -277,7 +277,7 @@ class StudentLifeDataLoader(DataLoader):
                 # delete the 'hour' and 'resp_time' columns
                 df = df.drop(columns=["hour", "resp_time"])
 
-                 # remove weekends
+                # remove weekends
                 if self.filter_weekends:
                     df = df[df['date'].apply(lambda x: x.weekday() < 5)]
 
@@ -324,16 +324,28 @@ class StudentLifeDataLoader(DataLoader):
                 df = df.dropna(subset=['hours'])
 
                 # rename the 'hours' column to 'work_hours'
-                df = df.rename(columns={"hours": "work_hours"})
+                df = df.rename(columns={"hours": "organizational_work_hours"})
 
                 df['date'] = df['resp_time'].dt.date
                 df['hour'] = df['resp_time'].dt.hour
 
-                # create new column name interval that depends on the 'hour' column
-                df['interval'] = df['hour'].apply(lambda x: 1 if x < 12 else 2 if x >= 9 and x < 6 else 3)
+                if self.level == 'day':
+                    df.drop_duplicates(subset=['date'], inplace=True, keep='last')
+
+                elif self.level == 'interval':
+                    # create new column name interval that depends on the 'hour' column
+                    df['interval'] = df['hour'].apply(lambda x: 1 if x < 12 else 2 if x >= 9 and x < 6 else 3)
 
                 # delete the 'hour' and 'resp_time' columns
                 df = df.drop(columns=["hour", "resp_time"])
+
+                # remove weekends
+                if self.filter_weekends:
+                    df = df[df['date'].apply(lambda x: x.weekday() < 5)]
+
+                if self.filter_weeks:
+                    # select dates between 1-april and 27-may
+                    df = df[(df['date'] >= pd.Timestamp('2013-03-27').date()) & (df['date'] <= pd.Timestamp('2013-05-27').date())]
 
                 # add the data to the dataframe using concat
                 class_data = pd.concat([class_data if not class_data.empty else None, df], ignore_index=True)
@@ -434,7 +446,7 @@ class StudentLifeDataLoader(DataLoader):
                 df = df.dropna(subset=['number'])
 
                 # rename the 'number' column to 'social_level'
-                df = df.rename(columns={"number": "social_level"})
+                df = df.rename(columns={"number": "organizational_social_interaction"})
 
                 df['date'] = df['resp_time'].dt.date
                 df['hour'] = df['resp_time'].dt.hour
@@ -448,6 +460,14 @@ class StudentLifeDataLoader(DataLoader):
 
                 # delete the 'hour' and 'resp_time' columns
                 df = df.drop(columns=["hour", "resp_time"])
+
+                # remove weekends
+                if self.filter_weekends:
+                    df = df[df['date'].apply(lambda x: x.weekday() < 5)]
+
+                if self.filter_weeks:
+                    # select dates between 1-april and 27-may
+                    df = df[(df['date'] >= pd.Timestamp('2013-03-27').date()) & (df['date'] <= pd.Timestamp('2013-05-27').date())]
 
                 # add the data to the dataframe using concat
                 social_data = pd.concat([social_data if not social_data.empty else None, df], ignore_index=True)
@@ -486,6 +506,24 @@ class StudentLifeDataLoader(DataLoader):
         data['environmental_cloudcover'] = pd.cut(data['environmental_cloudcover'], bins=5, labels=False)
         return data
     
+    def get_deadlines_data(self):
+
+        # get deadlines data
+        relative_deadlines_path = self.config["deadlines_data_path"]
+
+        data = pd.read_csv(os.getcwd() + relative_deadlines_path)
+        
+        # Convertir el DataFrame de formato ancho a largo
+        df_deadlines_melted = data.melt(id_vars=['uid'], var_name='date', value_name='deadlines')
+
+        # Extraer el número de la columna 'uid' y convertirlo a tipo int
+        df_deadlines_melted['user_id'] = df_deadlines_melted['uid'].str.extract('(\d+)').astype(int)
+        df_deadlines_melted.drop(['uid'], axis=1, inplace=True)
+        df_deadlines_melted['deadlines'] = df_deadlines_melted['deadlines'].fillna(0)
+        #df_deadlines_melted['date'] = pd.to_datetime(df_deadlines_melted['date'])
+    
+        return df_deadlines_melted
+    
 
     def get_conversation_data(self):
         # get all users with conversation responses
@@ -493,7 +531,7 @@ class StudentLifeDataLoader(DataLoader):
         files = os.listdir(os.getcwd() + relative_conversation_path)
 
         # create dataframe to store stress responses of all users, with three columns: user_id, stress_level and response_time
-        conversation_data = pd.DataFrame(columns=["user_id", "date", "social_voice_sum", "social_voice_count", "social_voice_mean", "social_voice_max"])
+        conversation_data = pd.DataFrame(columns=["user_id", "date", "organizational_social_voice_sum", "organizational_social_voice_count", "organizational_social_voice_mean", "organizational_social_voice_max"])
 
         for file in files:
             # get the user name from the filename with the following format: Stress_u16.json
@@ -521,12 +559,22 @@ class StudentLifeDataLoader(DataLoader):
                 
                 
 
-                df = df.groupby(['date'], observed=False, as_index=False).agg(social_voice_sum=('duration', 'sum'), social_voice_count=('duration', 'count'), social_voice_mean=('duration', 'mean'), social_voice_max=('duration', 'max'))
+                df = df.groupby(['date'], observed=False, as_index=False).agg(organizational_social_voice_sum=('duration', 'sum'), organizational_social_voice_count=('duration', 'count'), organizational_social_voice_mean=('duration', 'mean'), organizational_social_voice_max=('duration', 'max'))
 
                 #df.drop(['start_timestamp', ' end_timestamp'], axis=1, inplace=True)
                 # add the data to the dataframe using concat
                 df['user_id'] = user_number
                 
+                # remove weekends
+                if self.filter_weekends:
+                    df = df[df['date'].apply(lambda x: x.weekday() < 5)]
+
+                if self.filter_weeks:
+                    # select dates between 1-april and 27-may
+                    df = df[(df['date'] >= pd.Timestamp('2013-03-27').date()) & (df['date'] <= pd.Timestamp('2013-05-27').date())]
+
                 conversation_data = pd.concat([conversation_data if not conversation_data.empty else None, df], ignore_index=True)
 
         return conversation_data
+    
+
