@@ -2,7 +2,7 @@
 /relatedwork/*.pdf
 /code/data/studentlife
 /code/data/catboost_info
-
+raw
 
 # general
 *.bundle.*

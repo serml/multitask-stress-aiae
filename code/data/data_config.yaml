@@ -1,13 +1,17 @@
 datasets:
   studentlife:
-    stress_data_path: '/studentlife/EMA/response/Stress'
-    social_data_path: '/studentlife/EMA/response/Social'
-    sleep_data_path: '/studentlife/EMA/response/Sleep'
-    class_data_path: '/studentlife/EMA/response/Class'
-    lab_data_path: '/studentlife/EMA/response/Lab'
-    conversation_data_path: '/studentlife/sensing/conversation'
-    weather_data_path: '/studentlife/studentlife_weather_hourly.csv'
-    bigfive_data_path: '/studentlife/survey/BigFive.csv'
-    flourishing_data_path: '/studentlife/survey/FlourishingScale.csv'
-    loneliness_data_path: '/studentlife/survey/LonelinessScale.csv'
-    users_chosen: [4, 7, 8, 10, 14, 16, 17, 19, 22, 23, 24, 32, 33, 35, 36, 43, 44, 49, 51, 52, 53, 57, 58]
+    stress_data_path: '/raw/studentlife/EMA/response/Stress'
+    social_data_path: '/raw/studentlife/EMA/response/Social'
+    sleep_data_path: '/raw/studentlife/EMA/response/Sleep'
+    class_data_path: '/raw/studentlife/EMA/response/Class'
+    lab_data_path: '/raw/studentlife/EMA/response/Lab'
+    conversation_data_path: '/raw/studentlife/sensing/conversation'
+    activity_data_path: '/raw/studentlife/sensing/activity'
+    weather_data_path: '/raw/studentlife/studentlife_weather_hourly.csv'
+    bigfive_data_path: '/raw/studentlife/survey/BigFive.csv'
+    flourishing_data_path: '/raw/studentlife/survey/FlourishingScale.csv'
+    loneliness_data_path: '/raw/studentlife/survey/LonelinessScale.csv'
+    users_chosen: [4, 7, 8, 10, 14, 16, 17, 19, 22, 23, 24, 32, 33, 35, 36, 43, 44, 49, 51, 52, 53, 57, 58, 59]
+
+  studentlife2024:
+    ema_data_path: '/raw/studentlife_2024/EMA/general_ema.csv'
