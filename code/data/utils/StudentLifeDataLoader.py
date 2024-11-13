@@ -524,6 +524,170 @@ class StudentLifeDataLoader(DataLoader):
     
         return df_deadlines_melted
     
+    
+    def get_activity_data(self):
+        # get all users with activity responses
+        relative_activity_path = self.config["activity_data_path"]
+        files = os.listdir(os.getcwd() + relative_activity_path)
+
+        # create dataframe to store activity responses of all users, with three columns: user_id, activity_level and response_time
+        activity_data = pd.DataFrame(columns=["user_id", "date", 'minutes_stationary', 'minutes_walking', 'minutes_running', 'minutes_unknown'])
+
+        for file in files:
+            # get the user name from the filename with the following format: Stress_u16.json
+            user_name = file.split(".")[0].split("_")[-1]
+
+            # get user number from the user_name
+            user_number = int(user_name.split("u")[1])
+
+            # check if the user is chosen
+            if user_number not in self.users_chosen:
+                continue
+
+            # get the data from the csv file
+            with open(os.getcwd() + relative_activity_path + "/" + file) as f:
+                # read csv as dataframe
+                df = pd.read_csv(f)
+                
+                # Convertir 'timestamp' a formato datetime
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+
+                # Establecer 'timestamp' como índice
+                df.set_index('timestamp', inplace=True)
+
+                # Agrupar en intervalos de 1 minuto y calcular la moda
+                df = df.resample('1min').agg(lambda x: x.mode()[0] if not x.mode().empty else None)
+
+                # Definir el mapeo de actividad a nombre
+                activity_mapping = {
+                    0.0: 'individual_minutes_stationary',
+                    1.0: 'individual_minutes_walking',
+                    2.0: 'individual_minutes_running',
+                    3.0: 'individual_minutes_unknown'
+                }
+
+                # Rellenar NaN con un valor temporal para agrupamiento
+                df[' activity inference'] = df[' activity inference'].fillna(-1)
+
+                # Mapear la actividad a su correspondiente columna
+                df['activity_column'] = df[' activity inference'].map(activity_mapping)
+
+                # Agrupar por fecha y contar los minutos para cada tipo de actividad
+                df = df.groupby(df.index.date).apply(lambda x: x['activity_column'].value_counts()).unstack(fill_value=0)
+
+                # Renombrar las columnas para que tengan el formato correcto
+                df = df.rename(columns={
+                    'individual_minutes_stationary': 'individual_minutes_stationary',
+                    'individual_minutes_walking': 'individual_minutes_walking',
+                    'individual_minutes_running': 'individual_minutes_running',
+                    'individual_minutes_unknown': 'individual_minutes_unknown'
+                })
+
+                # Asegurarse de que todas las columnas están presentes
+                for col in ['individual_minutes_stationary', 'individual_minutes_walking', 'individual_minutes_running', 'individual_minutes_unknown']:
+                    if col not in df.columns:
+                        df[col] = 0
+
+                df = df[['individual_minutes_stationary', 'individual_minutes_walking', 'individual_minutes_running', 'individual_minutes_unknown']]
+
+                df['user_id'] = user_number
+                
+                df.reset_index(inplace=True)
+
+                # remove weekends
+                if self.filter_weekends:
+                    df = df[df['index'].apply(lambda x: x.weekday() < 5)]
+
+                if self.filter_weeks:
+                    # select dates between 1-april and 27-may
+                    df = df[(df['index'] >= pd.Timestamp('2013-03-27').date()) & (df['index'] <= pd.Timestamp('2013-05-27').date())]
+
+                activity_data = pd.concat([activity_data if not activity_data.empty else None, df], ignore_index=True)
+
+        return activity_data
+    
+
+    def get_audio_data(self):
+        # get all users with audio responses
+        relative_audio_path = self.config["audio_data_path"]
+        files = os.listdir(os.getcwd() + relative_audio_path)
+
+        # create dataframe to store stress responses of all users, with three columns: user_id, stress_level and response_time
+        audio_data = pd.DataFrame(columns=["user_id", "date", "stress_level", "response_time"])
+
+        for file in files:
+            # get the user name from the filename with the following format: Stress_u16.json
+            user_name = file.split(".")[0].split("_")[-1]
+
+            # get user number from the user_name
+            user_number = int(user_name.split("u")[1])
+
+            # check if the user is chosen
+            if user_number not in self.users_chosen:
+                continue
+
+            # get the data from the csv file
+            with open(os.getcwd() + relative_audio_path + "/" + file) as f:
+                # read csv as dataframe
+                df = pd.read_csv(f)
+                
+                # Convertir 'timestamp' a formato datetime
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+
+                # Establecer 'timestamp' como índice
+                df.set_index('timestamp', inplace=True)
+
+                # Agrupar en intervalos de 1 minuto y calcular la moda
+                df = df.resample('1min').agg(lambda x: x.mode()[0] if not x.mode().empty else None)
+
+                # Definir el mapeo de actividad a nombre
+                audio_mapping = {
+                    0.0: 'environmental_minutes_silence',
+                    1.0: 'environmental_minutes_voice',
+                    2.0: 'environmental_minutes_noise',
+                    3.0: 'environmental_minutes_unknown'
+                }
+
+                # Rellenar NaN con un valor temporal para agrupamiento
+                df[' audio inference'] = df[' audio inference'].fillna(-1)
+
+                # Mapear la actividad a su correspondiente columna
+                df['audio_column'] = df[' audio inference'].map(audio_mapping)
+
+                # Agrupar por fecha y contar los minutos para cada tipo de actividad
+                df = df.groupby(df.index.date).apply(lambda x: x['audio_column'].value_counts()).unstack(fill_value=0)
+
+                # Renombrar las columnas para que tengan el formato correcto
+                df = df.rename(columns={
+                    'environmental_minutes_silence': 'environmental_minutes_silence',
+                    'environmental_minutes_voice': 'environmental_minutes_voice',
+                    'environmental_minutes_noise': 'environmental_minutes_noise',
+                    'environmental_minutes_unknown': 'environmental_minutes_unknown'
+                })
+
+                # Asegurarse de que todas las columnas están presentes
+                for col in ['environmental_minutes_silence', 'environmental_minutes_voice', 'environmental_minutes_noise', 'environmental_minutes_unknown']:
+                    if col not in df.columns:
+                        df[col] = 0
+
+                df = df[['environmental_minutes_silence', 'environmental_minutes_voice', 'environmental_minutes_noise', 'environmental_minutes_unknown']]
+
+                df['user_id'] = user_number
+                
+                df.reset_index(inplace=True)
+
+                # remove weekends
+                if self.filter_weekends:
+                    df = df[df['index'].apply(lambda x: x.weekday() < 5)]
+
+                if self.filter_weeks:
+                    # select dates between 1-april and 27-may
+                    df = df[(df['index'] >= pd.Timestamp('2013-03-27').date()) & (df['index'] <= pd.Timestamp('2013-05-27').date())]
+
+                audio_data = pd.concat([audio_data if not audio_data.empty else None, df], ignore_index=True)
+        
+        return audio_data
+
 
     def get_conversation_data(self):
         # get all users with conversation responses
