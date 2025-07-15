@@ -144,3 +144,4 @@ ui-tests/.yarn/*
 ui-tests/.pnp.*
 
 code/data/processed
+code/data/trash

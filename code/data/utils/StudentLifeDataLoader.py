@@ -475,7 +475,7 @@ class StudentLifeDataLoader(DataLoader):
         return social_data
     
 
-    def get_weather_data(self):
+    def get_weather_data(self, cut=False):
         relative_weather_path = self.config["weather_data_path"]
         data = pd.read_csv(os.getcwd() + relative_weather_path)
         data.set_index('time', inplace=True)
@@ -489,23 +489,25 @@ class StudentLifeDataLoader(DataLoader):
             environmental_humidity_min=('relativehumidity_2m (%)', 'min'), 
             environmental_precipitation=('precipitation (mm)', 'sum'), environmental_cloudcover=('cloudcover (%)', 'mean'))
 
-        # bin ambient temperature to 1-5
-        data['environmental_temperature_mean'] = pd.cut(data['environmental_temperature_mean'], bins=5, labels=False)
-        data['environmental_temperature_max'] = pd.cut(data['environmental_temperature_max'], bins=5, labels=False)
-        data['environmental_temperature_min'] = pd.cut(data['environmental_temperature_min'], bins=5, labels=False)
+        if cut:
+            # bin ambient temperature to 1-5
+            data['environmental_temperature_mean'] = pd.cut(data['environmental_temperature_mean'], bins=5, labels=False)
+            data['environmental_temperature_max'] = pd.cut(data['environmental_temperature_max'], bins=5, labels=False)
+            data['environmental_temperature_min'] = pd.cut(data['environmental_temperature_min'], bins=5, labels=False)
 
-        # bin ambient humidity to 1-5
-        data['environmental_humidity_mean'] = pd.cut(data['environmental_humidity_mean'], bins=5, labels=False)
-        data['environmental_humidity_max'] = pd.cut(data['environmental_humidity_max'], bins=5, labels=False)
-        data['environmental_humidity_min'] = pd.cut(data['environmental_humidity_min'], bins=5, labels=False)
+            # bin ambient humidity to 1-5
+            data['environmental_humidity_mean'] = pd.cut(data['environmental_humidity_mean'], bins=5, labels=False)
+            data['environmental_humidity_max'] = pd.cut(data['environmental_humidity_max'], bins=5, labels=False)
+            data['environmental_humidity_min'] = pd.cut(data['environmental_humidity_min'], bins=5, labels=False)
 
-        # bin ambient precipitation to 1-5
-        data['environmental_precipitation'] = pd.cut(data['environmental_precipitation'], bins=5, labels=False)
+            # bin ambient precipitation to 1-5
+            data['environmental_precipitation'] = pd.cut(data['environmental_precipitation'], bins=5, labels=False)
 
-        # bin ambient cloudcover to 1-5
-        data['environmental_cloudcover'] = pd.cut(data['environmental_cloudcover'], bins=5, labels=False)
+            # bin ambient cloudcover to 1-5
+            data['environmental_cloudcover'] = pd.cut(data['environmental_cloudcover'], bins=5, labels=False)
         return data
     
+
     def get_deadlines_data(self):
 
         # get deadlines data
