@@ -1,6 +1,8 @@
+from pathlib import Path
 from utils.DataLoader import DataLoader
 import os
 import pandas as pd
+from pathlib import Path
 
 class StudentLifeDataLoader(DataLoader):
     
@@ -48,7 +50,7 @@ class StudentLifeDataLoader(DataLoader):
                 df['date'] = df['resp_time'].dt.date
                 df['hour'] = df['resp_time'].dt.hour
                 
-                df['stress_level'] = df['stress_level'].apply(lambda x: 1 if x == 5 else 2 if x == 4 else 3 if x == 1 else 4 if x == 3 else 5)
+                df['stress_level'] = df['stress_level'].apply(lambda x: 1 if x == 5 else 2 if x == 4 else 3 if x == 1 else 4 if x == 2 else 5)
 
                 if self.level == 'day':
                     #df.drop_duplicates(subset=['stress_level', 'date','hour'], inplace=True)
@@ -255,14 +257,14 @@ class StudentLifeDataLoader(DataLoader):
             with open(os.getcwd() + relative_sleep_path + "/" + file) as f:
                 # read json as dataframe
                 df = pd.read_json(f)
-                df = df[['resp_time', 'hour']]
+                df = df[['resp_time', 'hour', 'rate']]
                 df['user_id'] = user_number
 
                 # drop nan values in the 'duration' column
                 df = df.dropna(subset=['hour'])
 
                 # rename the 'duration' column to'sleep_duration'
-                df = df.rename(columns={"hour": "individual_sleep_duration"})
+                df = df.rename(columns={"hour": "individual_sleep_duration", "rate" : "individual_sleep_rate"})
 
                 df['date'] = df['resp_time'].dt.date
                 df['hour'] = df['resp_time'].dt.hour
@@ -527,220 +529,133 @@ class StudentLifeDataLoader(DataLoader):
         return df_deadlines_melted
     
     
-    def get_activity_data(self):
-        # get all users with activity responses
-        relative_activity_path = self.config["activity_data_path"]
-        files = os.listdir(os.getcwd() + relative_activity_path)
 
-        # create dataframe to store activity responses of all users, with three columns: user_id, activity_level and response_time
-        activity_data = pd.DataFrame(columns=["user_id", "date", 'minutes_stationary', 'minutes_walking', 'minutes_running', 'minutes_unknown'])
+    def _process_binned_data(self, data_path, column_map, target_columns, users_chosen, filter_weekends, filter_weeks):
+        """
+        Generic helper function to process binned time-series data (activity or audio).
+        Aggregates data by minute, then counts minutes per category for each day.
+        """
+        files_path = Path.cwd() / data_path
+        data_frames = []
 
-        for file in files:
-            # get the user name from the filename with the following format: Stress_u16.json
-            user_name = file.split(".")[0].split("_")[-1]
-
-            # get user number from the user_name
-            user_number = int(user_name.split("u")[1])
-
-            # check if the user is chosen
-            if user_number not in self.users_chosen:
+        for file_path in files_path.iterdir():
+            if not file_path.name.endswith('.csv'):
                 continue
 
-            # get the data from the csv file
-            with open(os.getcwd() + relative_activity_path + "/" + file) as f:
-                # read csv as dataframe
-                df = pd.read_csv(f)
+            user_number = int(file_path.stem.split("_u")[-1])
+            if user_number not in users_chosen:
+                continue
                 
-                # Convertir 'timestamp' a formato datetime
-                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+            df = pd.read_csv(file_path)
+            
+            # Infer column names from the mapping
+            inference_col_name = list(column_map.keys())[0] # e.g., ' activity inference'
+            
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+            df.set_index('timestamp', inplace=True)
 
-                # Establecer 'timestamp' como índice
-                df.set_index('timestamp', inplace=True)
-
-                # Agrupar en intervalos de 1 minuto y calcular la moda
-                df = df.resample('1min').agg(lambda x: x.mode()[0] if not x.mode().empty else None)
-
-                # Definir el mapeo de actividad a nombre
-                activity_mapping = {
-                    0.0: 'individual_minutes_stationary',
-                    1.0: 'individual_minutes_walking',
-                    2.0: 'individual_minutes_running',
-                    3.0: 'individual_minutes_unknown'
-                }
-
-                # Rellenar NaN con un valor temporal para agrupamiento
-                df[' activity inference'] = df[' activity inference'].fillna(-1)
-
-                # Mapear la actividad a su correspondiente columna
-                df['activity_column'] = df[' activity inference'].map(activity_mapping)
-
-                # Agrupar por fecha y contar los minutos para cada tipo de actividad
-                df = df.groupby(df.index.date).apply(lambda x: x['activity_column'].value_counts()).unstack(fill_value=0)
-
-                # Renombrar las columnas para que tengan el formato correcto
-                df = df.rename(columns={
-                    'individual_minutes_stationary': 'individual_minutes_stationary',
-                    'individual_minutes_walking': 'individual_minutes_walking',
-                    'individual_minutes_running': 'individual_minutes_running',
-                    'individual_minutes_unknown': 'individual_minutes_unknown'
-                })
-
-                # Asegurarse de que todas las columnas están presentes
-                for col in ['individual_minutes_stationary', 'individual_minutes_walking', 'individual_minutes_running', 'individual_minutes_unknown']:
-                    if col not in df.columns:
-                        df[col] = 0
-
-                df = df[['individual_minutes_stationary', 'individual_minutes_walking', 'individual_minutes_running', 'individual_minutes_unknown']]
-
-                df['user_id'] = user_number
+            df_resampled = df.resample('1min').agg(lambda x: x.mode()[0] if not x.mode().empty else None)
+            df_resampled['category'] = df_resampled[inference_col_name].map(column_map.get(inference_col_name))
+            
+            daily_counts = df_resampled.groupby(df_resampled.index.date)['category'].value_counts().unstack(fill_value=0)
+            daily_counts = daily_counts.reindex(columns=target_columns, fill_value=0)
+            
+            daily_counts['user_id'] = user_number
+            daily_counts.reset_index(inplace=True)
+            daily_counts.rename(columns={'index': 'date'}, inplace=True)
+            
+            # Vectorized filtering for efficiency
+            if filter_weekends:
+                daily_counts = daily_counts[pd.to_datetime(daily_counts['date']).dt.weekday < 5]
+            if filter_weeks:
+                start_date = pd.Timestamp('2013-03-27').date()
+                end_date = pd.Timestamp('2013-05-27').date()
+                daily_counts = daily_counts[(daily_counts['date'] >= start_date) & (daily_counts['date'] <= end_date)]
                 
-                df.reset_index(inplace=True)
+            data_frames.append(daily_counts)
 
-                # remove weekends
-                if self.filter_weekends:
-                    df = df[df['index'].apply(lambda x: x.weekday() < 5)]
+        return pd.concat(data_frames, ignore_index=True)
 
-                if self.filter_weeks:
-                    # select dates between 1-april and 27-may
-                    df = df[(df['index'] >= pd.Timestamp('2013-03-27').date()) & (df['index'] <= pd.Timestamp('2013-05-27').date())]
 
-                activity_data = pd.concat([activity_data if not activity_data.empty else None, df], ignore_index=True)
-
-        return activity_data
-    
+    def get_activity_data(self):
+        activity_map = {
+            ' activity inference': {
+                0.0: 'individual_minutes_stationary',
+                1.0: 'individual_minutes_walking',
+                2.0: 'individual_minutes_running',
+                3.0: 'individual_minutes_unknown'
+            }
+        }
+        target_cols = list(activity_map[' activity inference'].values())
+        
+        return self._process_binned_data(
+            data_path=self.config["activity_data_path"],
+            column_map=activity_map,
+            target_columns=target_cols,
+            users_chosen=self.users_chosen,
+            filter_weekends=self.filter_weekends,
+            filter_weeks=self.filter_weeks
+        )
 
     def get_audio_data(self):
-        # get all users with audio responses
-        relative_audio_path = self.config["audio_data_path"]
-        files = os.listdir(os.getcwd() + relative_audio_path)
-
-        # create dataframe to store stress responses of all users, with three columns: user_id, stress_level and response_time
-        audio_data = pd.DataFrame(columns=["user_id", "date", "stress_level", "response_time"])
-
-        for file in files:
-            # get the user name from the filename with the following format: Stress_u16.json
-            user_name = file.split(".")[0].split("_")[-1]
-
-            # get user number from the user_name
-            user_number = int(user_name.split("u")[1])
-
-            # check if the user is chosen
-            if user_number not in self.users_chosen:
-                continue
-
-            # get the data from the csv file
-            with open(os.getcwd() + relative_audio_path + "/" + file) as f:
-                # read csv as dataframe
-                df = pd.read_csv(f)
-                
-                # Convertir 'timestamp' a formato datetime
-                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
-
-                # Establecer 'timestamp' como índice
-                df.set_index('timestamp', inplace=True)
-
-                # Agrupar en intervalos de 1 minuto y calcular la moda
-                df = df.resample('1min').agg(lambda x: x.mode()[0] if not x.mode().empty else None)
-
-                # Definir el mapeo de actividad a nombre
-                audio_mapping = {
-                    0.0: 'environmental_minutes_silence',
-                    1.0: 'environmental_minutes_voice',
-                    2.0: 'environmental_minutes_noise',
-                    3.0: 'environmental_minutes_unknown'
-                }
-
-                # Rellenar NaN con un valor temporal para agrupamiento
-                df[' audio inference'] = df[' audio inference'].fillna(-1)
-
-                # Mapear la actividad a su correspondiente columna
-                df['audio_column'] = df[' audio inference'].map(audio_mapping)
-
-                # Agrupar por fecha y contar los minutos para cada tipo de actividad
-                df = df.groupby(df.index.date).apply(lambda x: x['audio_column'].value_counts()).unstack(fill_value=0)
-
-                # Renombrar las columnas para que tengan el formato correcto
-                df = df.rename(columns={
-                    'environmental_minutes_silence': 'environmental_minutes_silence',
-                    'environmental_minutes_voice': 'environmental_minutes_voice',
-                    'environmental_minutes_noise': 'environmental_minutes_noise',
-                    'environmental_minutes_unknown': 'environmental_minutes_unknown'
-                })
-
-                # Asegurarse de que todas las columnas están presentes
-                for col in ['environmental_minutes_silence', 'environmental_minutes_voice', 'environmental_minutes_noise', 'environmental_minutes_unknown']:
-                    if col not in df.columns:
-                        df[col] = 0
-
-                df = df[['environmental_minutes_silence', 'environmental_minutes_voice', 'environmental_minutes_noise', 'environmental_minutes_unknown']]
-
-                df['user_id'] = user_number
-                
-                df.reset_index(inplace=True)
-
-                # remove weekends
-                if self.filter_weekends:
-                    df = df[df['index'].apply(lambda x: x.weekday() < 5)]
-
-                if self.filter_weeks:
-                    # select dates between 1-april and 27-may
-                    df = df[(df['index'] >= pd.Timestamp('2013-03-27').date()) & (df['index'] <= pd.Timestamp('2013-05-27').date())]
-
-                audio_data = pd.concat([audio_data if not audio_data.empty else None, df], ignore_index=True)
+        audio_map = {
+            ' audio inference': {
+                0.0: 'environmental_minutes_silence',
+                1.0: 'environmental_minutes_voice',
+                2.0: 'environmental_minutes_noise',
+                3.0: 'environmental_minutes_unknown'
+            }
+        }
+        target_cols = list(audio_map[' audio inference'].values())
         
-        return audio_data
+        return self._process_binned_data(
+            data_path=self.config["audio_data_path"],
+            column_map=audio_map,
+            target_columns=target_cols,
+            users_chosen=self.users_chosen,
+            filter_weekends=self.filter_weekends,
+            filter_weeks=self.filter_weeks
+        )
 
+        
 
     def get_conversation_data(self):
-        # get all users with conversation responses
-        relative_conversation_path = self.config["conversation_data_path"]
-        files = os.listdir(os.getcwd() + relative_conversation_path)
+        files_path = Path.cwd() / self.config["conversation_data_path"]
+        data_frames = []
 
-        # create dataframe to store stress responses of all users, with three columns: user_id, stress_level and response_time
-        conversation_data = pd.DataFrame(columns=["user_id", "date", "organizational_social_voice_sum", "organizational_social_voice_count", "organizational_social_voice_mean", "organizational_social_voice_max"])
+        for file_path in files_path.iterdir():
+            if not file_path.name.endswith('.csv'):
+                continue
 
-        for file in files:
-            # get the user name from the filename with the following format: Stress_u16.json
-            user_name = file.split(".")[0].split("_")[-1]
-
-            # get user number from the user_name
-            user_number = int(user_name.split("u")[1])
-
-            # check if the user is chosen
+            user_number = int(file_path.stem.split("_u")[-1])
             if user_number not in self.users_chosen:
                 continue
 
-            # get the data from the csv file
-            with open(os.getcwd() + relative_conversation_path + "/" + file) as f:
-                # read csv as dataframe
-                df = pd.read_csv(f)
-                
-                df['date'] = pd.to_datetime(df['start_timestamp'], unit='s').dt.date
+            df = pd.read_csv(file_path)
+            df['date'] = pd.to_datetime(df['start_timestamp'], unit='s').dt.date
+            df['duration'] = df[' end_timestamp'] - df['start_timestamp']
+            
+            # Efficient aggregation
+            daily_agg = df.groupby('date').agg(
+                organizational_social_voice_sum=('duration', 'sum'),
+                organizational_social_voice_count=('duration', 'count'),
+                organizational_social_voice_mean=('duration', 'mean'),
+                organizational_social_voice_max=('duration', 'max')
+            ).reset_index()
 
+            daily_agg['user_id'] = user_number
+            
+            # Vectorized filtering
+            if self.filter_weekends:
+                daily_agg = daily_agg[pd.to_datetime(daily_agg['date']).dt.weekday < 5]
+            if self.filter_weeks:
+                start_date = pd.Timestamp('2013-03-27').date()
+                end_date = pd.Timestamp('2013-05-27').date()
+                daily_agg = daily_agg[(daily_agg['date'] >= start_date) & (daily_agg['date'] <= end_date)]
                 
-                df['duration'] = (df[' end_timestamp'] - df['start_timestamp'])
-                
-                #df = df.resample('D').sum(numeric_only=True)
-                df.drop(['start_timestamp', ' end_timestamp'], axis=1, inplace=True)
-                
-                
+            data_frames.append(daily_agg)
+            
+        return pd.concat(data_frames, ignore_index=True)
 
-                df = df.groupby(['date'], observed=False, as_index=False).agg(organizational_social_voice_sum=('duration', 'sum'), organizational_social_voice_count=('duration', 'count'), organizational_social_voice_mean=('duration', 'mean'), organizational_social_voice_max=('duration', 'max'))
-
-                #df.drop(['start_timestamp', ' end_timestamp'], axis=1, inplace=True)
-                # add the data to the dataframe using concat
-                df['user_id'] = user_number
-                
-                # remove weekends
-                if self.filter_weekends:
-                    df = df[df['date'].apply(lambda x: x.weekday() < 5)]
-
-                if self.filter_weeks:
-                    # select dates between 1-april and 27-may
-                    df = df[(df['date'] >= pd.Timestamp('2013-03-27').date()) & (df['date'] <= pd.Timestamp('2013-05-27').date())]
-
-                conversation_data = pd.concat([conversation_data if not conversation_data.empty else None, df], ignore_index=True)
-
-        return conversation_data
     
 
