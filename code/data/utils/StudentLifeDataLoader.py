@@ -173,7 +173,7 @@ class StudentLifeDataLoader(DataLoader):
         
         return stress_data
     
-    def get_bigfive_data(self):
+    def get_bigfive_data(self, type='pre'):
         relative_bigfive_path = self.config["bigfive_data_path"]
         bigfive = pd.read_csv(os.getcwd() + relative_bigfive_path)
 
@@ -195,10 +195,10 @@ class StudentLifeDataLoader(DataLoader):
         bigfive['neuroticism'] = bigfive[4] - bigfive[9] + bigfive[14] + bigfive[19] - bigfive[24] + bigfive[29] - bigfive[34] + bigfive[39]
         bigfive['openness'] = bigfive[5] + bigfive[10] + bigfive[15] + bigfive[20] + bigfive[25] + bigfive[30] - bigfive[35] + bigfive[40] - bigfive[41] + bigfive[44]
 
-        return bigfive[bigfive['type'] == 'pre']
+        return bigfive[bigfive['type'] == type]
     
     
-    def get_loneliness_data(self):
+    def get_loneliness_data(self, type='pre'):
         relative_loneliness_path = self.config["loneliness_data_path"]
         loneliness = pd.read_csv(os.getcwd() + relative_loneliness_path)
 
@@ -217,10 +217,10 @@ class StudentLifeDataLoader(DataLoader):
             + loneliness[11] + loneliness[12] + loneliness[13] + loneliness[14] + loneliness[15] + loneliness[16] \
             + loneliness[17] + loneliness[18] + loneliness[19] + loneliness[20]
 
-        return loneliness[loneliness['type'] == 'pre']
+        return loneliness[loneliness['type'] == type]
     
     
-    def get_flourishing_data(self):
+    def get_flourishing_data(self, type='pre'):
         relative_flourishing_path = self.config["flourishing_data_path"]
         flourishing = pd.read_csv(os.getcwd() + relative_flourishing_path)
 
@@ -229,7 +229,7 @@ class StudentLifeDataLoader(DataLoader):
 
         flourishing['flourishing_score'] = flourishing[1] - flourishing[2] + flourishing[3] + flourishing[4] + flourishing[5] + flourishing[6] + flourishing[7] + flourishing[8]
 
-        return flourishing[flourishing['type'] == 'pre']
+        return flourishing[flourishing['type'] == type]
     
     # the same as the above, but with sleep data instead
     def get_sleep_data(self):

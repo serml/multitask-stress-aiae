@@ -145,3 +145,6 @@ ui-tests/.pnp.*
 
 code/data/processed
 code/data/trash
+code/data/augmented
+code/ml/outputs
+code/ml/catboost_info
