@@ -13,7 +13,7 @@ class StudentLifeDataLoader(DataLoader):
         self.filter_weeks = filter_weeks
         self.level = level
 
-    def get_stress_data(self, stress_mapping='median', ):
+    def get_stress_data(self, stress_mapping='median'):
 
         # get all users with stress responses
         relative_stress_path = self.config["stress_data_path"]
@@ -56,8 +56,10 @@ class StudentLifeDataLoader(DataLoader):
                     #df.drop_duplicates(subset=['stress_level', 'date','hour'], inplace=True)
 
                     # get average of that date and round to nearest integer
-                    df['stress_level'] = df.groupby(['date'])['stress_level'].transform(lambda x: x.mean().round())
-                    df.drop_duplicates(subset=['date'], inplace=True)
+                    # df['stress_level'] = df.groupby(['date'])['stress_level'].transform(lambda x: x.mean().round())
+
+                    # get last of that date
+                    df.drop_duplicates(subset=['date'], inplace=True, keep='last')
                 elif self.level == 'interval':
                     # create new column name interval that depends on the 'hour' column
                     df['interval'] = df['hour'].apply(lambda x: 1 if x < 12 else 2 if x >= 9 and x < 6 else 3)
@@ -69,7 +71,6 @@ class StudentLifeDataLoader(DataLoader):
                     df['stress_level'] = df['stress_level'].apply(lambda x: 1 if x < median_stress else 2 if x == median_stress else 3)
                 elif stress_mapping == 'simple':
                     df['stress_level'] = df['stress_level'].apply(lambda x: 1 if x < 3 else 2 if x == 3 else 3)
-                
 
                 # delete the 'hour' and 'resp_time' columns
                 df = df.drop(columns=["hour", "resp_time"])
