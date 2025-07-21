@@ -3,6 +3,45 @@ from utils.DataLoader import DataLoader
 import os
 import pandas as pd
 from pathlib import Path
+from joblib import Parallel, delayed
+
+def _process_single_file(file_path, column_map, target_columns, filter_weekends, filter_weeks):
+    """
+    Optimized function to process a single user's binned data file.
+    Defined at the module level to be easily picked by joblib.
+    """
+    user_number = int(file_path.stem.split("_u")[-1])
+    df = pd.read_csv(file_path)
+    
+    inference_col_name = list(column_map.keys())[0]
+
+    # Vectorized mode calculation
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+    df['minute'] = df['timestamp'].dt.floor('1min')
+    counts = df.groupby(['minute', inference_col_name]).size()
+    idx = counts.groupby(level='minute').idxmax()
+    modes = pd.Series([i[1] for i in idx], index=[i[0] for i in idx])
+    
+    df_resampled = pd.DataFrame(modes, columns=['category_code'])
+    df_resampled['category'] = df_resampled['category_code'].map(column_map[inference_col_name])
+    
+    daily_counts = df_resampled.groupby(df_resampled.index.date)['category'].value_counts().unstack(fill_value=0)
+    
+    daily_counts = daily_counts.reindex(columns=target_columns, fill_value=0)
+    daily_counts['user_id'] = user_number
+    daily_counts.reset_index(inplace=True)
+    daily_counts.rename(columns={'index': 'date'}, inplace=True)
+    daily_counts['date'] = pd.to_datetime(daily_counts['date']).dt.date
+
+    # Filtering logic
+    if filter_weekends:
+        daily_counts = daily_counts[pd.to_datetime(daily_counts['date']).dt.weekday < 5]
+    if filter_weeks:
+        start_date = pd.Timestamp('2013-03-27').date()
+        end_date = pd.Timestamp('2013-05-27').date()
+        daily_counts = daily_counts[(daily_counts['date'] >= start_date) & (daily_counts['date'] <= end_date)]
+        
+    return daily_counts
 
 class StudentLifeDataLoader(DataLoader):
     
@@ -13,6 +52,14 @@ class StudentLifeDataLoader(DataLoader):
         self.filter_weeks = filter_weeks
         self.level = level
 
+    def categorize_hour(hour):
+        if hour < 12:  # Intervalo 1: Mañana (00:00 - 11:59)
+            return 1
+        elif hour < 18: # Intervalo 2: Tarde (12:00 - 17:59)
+            return 2
+        else:           # Intervalo 3: Noche (18:00 - 23:59)
+            return 3
+        
     def get_stress_data(self, stress_mapping='median'):
 
         # get all users with stress responses
@@ -62,7 +109,7 @@ class StudentLifeDataLoader(DataLoader):
                     df.drop_duplicates(subset=['date'], inplace=True, keep='last')
                 elif self.level == 'interval':
                     # create new column name interval that depends on the 'hour' column
-                    df['interval'] = df['hour'].apply(lambda x: 1 if x < 12 else 2 if x >= 9 and x < 6 else 3)
+                    df['interval'] = df['hour'].apply(categorize_hour)
                     df.drop_duplicates(subset=['date', 'interval'], inplace=True)
 
                 if stress_mapping == 'median':
@@ -135,7 +182,7 @@ class StudentLifeDataLoader(DataLoader):
                     df.drop_duplicates(subset=['date'], inplace=True)
                 elif self.level == 'interval':
                     # create new column name interval that depends on the 'hour' column
-                    df['interval'] = df['hour'].apply(lambda x: 1 if x < 12 else 2 if x >= 9 and x < 6 else 3)
+                    df['interval'] = df['hour'].apply(categorize_hour)
 
                 if stress_mapping == 'median':
                     # calculate median value of all the stress levels
@@ -232,6 +279,7 @@ class StudentLifeDataLoader(DataLoader):
 
         return flourishing[flourishing['type'] == type]
     
+
     # the same as the above, but with sleep data instead
     def get_sleep_data(self):
         # the same as the above, but with sleep data instead.
@@ -275,7 +323,7 @@ class StudentLifeDataLoader(DataLoader):
 
                 elif self.level == 'interval':
                     # create new column name interval that depends on the 'hour' column
-                    df['interval'] = df['hour'].apply(lambda x: 1 if x < 12 else 2 if x >= 9 and x < 6 else 3)
+                    df['interval'] = df['hour'].apply(categorize_hour)
 
                 # delete the 'hour' and 'resp_time' columns
                 df = df.drop(columns=["hour", "resp_time"])
@@ -337,7 +385,7 @@ class StudentLifeDataLoader(DataLoader):
 
                 elif self.level == 'interval':
                     # create new column name interval that depends on the 'hour' column
-                    df['interval'] = df['hour'].apply(lambda x: 1 if x < 12 else 2 if x >= 9 and x < 6 else 3)
+                    df['interval'] = df['hour'].apply(categorize_hour)
 
                 # delete the 'hour' and 'resp_time' columns
                 df = df.drop(columns=["hour", "resp_time"])
@@ -459,7 +507,7 @@ class StudentLifeDataLoader(DataLoader):
 
                 elif self.level == 'interval':
                     # create new column name interval that depends on the 'hour' column
-                    df['interval'] = df['hour'].apply(lambda x: 1 if x < 12 else 2 if x >= 9 and x < 6 else 3)
+                    df['interval'] = df['hour'].apply(categorize_hour)
 
                 # delete the 'hour' and 'resp_time' columns
                 df = df.drop(columns=["hour", "resp_time"])
@@ -512,70 +560,126 @@ class StudentLifeDataLoader(DataLoader):
     
 
     def get_deadlines_data(self):
-
-        # get deadlines data
+        """
+        Process deadlines data and calculate days until next deadline for each user.
+        
+        Returns:
+            pd.DataFrame: DataFrame with deadlines and days_until_next_deadline columns
+        """
+        
+        # Get deadlines data
         relative_deadlines_path = self.config["deadlines_data_path"]
-
         data = pd.read_csv(os.getcwd() + relative_deadlines_path)
         
-        # Convertir el DataFrame de formato ancho a largo
+        # Convert DataFrame from wide to long format
         df_deadlines_melted = data.melt(id_vars=['uid'], var_name='date', value_name='deadlines')
-
-        # Extraer el número de la columna 'uid' y convertirlo a tipo int
+        
+        # Extract number from 'uid' column and convert to int
         df_deadlines_melted['user_id'] = df_deadlines_melted['uid'].str.extract('(\d+)').astype(int)
         df_deadlines_melted.drop(['uid'], axis=1, inplace=True)
         df_deadlines_melted['deadlines'] = df_deadlines_melted['deadlines'].fillna(0)
-        #df_deadlines_melted['date'] = pd.to_datetime(df_deadlines_melted['date'])
-    
+        
+        # users specified in self.users_chosen BEFORE performing heavy calculations.
+        df_deadlines_melted = df_deadlines_melted[
+            df_deadlines_melted['user_id'].isin(self.users_chosen)
+        ].reset_index(drop=True)
+
+        # Convert date column to datetime for proper date calculations
+        df_deadlines_melted['date'] = pd.to_datetime(df_deadlines_melted['date'])
+        
+        # Sort by user_id and date to ensure proper chronological order
+        df_deadlines_melted = df_deadlines_melted.sort_values(['user_id', 'date']).reset_index(drop=True)
+        
+        # --- NEW FUNCTIONALITY: Calculate days until next deadline ---
+        def calculate_days_until_next_deadline(group):
+            """
+            Calculate days until next deadline for each row in a user group.
+            
+            Args:
+                group (pd.DataFrame): DataFrame group for a single user
+                
+            Returns:
+                pd.Series: Series with days_until_next_deadline values
+            """
+            days_until_next = []
+            
+            for idx, row in group.iterrows():
+                current_date = row['date']
+                
+                # Find future dates with deadlines (deadlines > 0) for this user
+                future_deadlines = group[
+                    (group['date'] > current_date) & 
+                    (group['deadlines'] > 0)
+                ]
+                
+                if len(future_deadlines) > 0:
+                    # Get the closest future deadline date
+                    next_deadline_date = future_deadlines['date'].min()
+                    # Calculate days difference
+                    days_diff = (next_deadline_date - current_date).days
+                    days_until_next.append(days_diff)
+                else:
+                    # No future deadlines found - use a large number or NaN
+                    # Using a large number (e.g., 999) is often better for ML models than NaN
+                    days_until_next.append(999)
+            
+            return pd.Series(days_until_next, index=group.index)
+        
+        # Apply the calculation function to each user group
+        df_deadlines_melted['organizational_days_until_next_deadline'] = (
+            df_deadlines_melted
+            .groupby('user_id')
+            .apply(calculate_days_until_next_deadline)
+            .reset_index(level=0, drop=True)
+        )
+
+        if self.filter_weeks:
+            # select dates between 1-april and 27-may
+            start = pd.to_datetime('2013-03-27')
+            end   = pd.to_datetime('2013-05-27')
+            df_deadlines_melted = df_deadlines_melted[(df_deadlines_melted['date'] >= start) & (df_deadlines_melted['date'] <= end)].reset_index(drop=True)
+        
+        df_deadlines_melted = df_deadlines_melted.rename({'deadlines' : 'organizational_deadlines'}, axis=1)
         return df_deadlines_melted
+
     
     
+
 
     def _process_binned_data(self, data_path, column_map, target_columns, users_chosen, filter_weekends, filter_weeks):
         """
         Generic helper function to process binned time-series data (activity or audio).
-        Aggregates data by minute, then counts minutes per category for each day.
+        This version uses parallel processing to significantly speed up the execution.
         """
         files_path = Path.cwd() / data_path
-        data_frames = []
-
+        
+        # Prepare a list of file paths to process
+        files_to_process = []
         for file_path in files_path.iterdir():
-            if not file_path.name.endswith('.csv'):
-                continue
+            if file_path.name.endswith('.csv'):
+                user_number = int(file_path.stem.split("_u")[-1])
+                if user_number in users_chosen:
+                    files_to_process.append(file_path)
 
-            user_number = int(file_path.stem.split("_u")[-1])
-            if user_number not in users_chosen:
-                continue
-                
-            df = pd.read_csv(file_path)
-            
-            # Infer column names from the mapping
-            inference_col_name = list(column_map.keys())[0] # e.g., ' activity inference'
-            
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
-            df.set_index('timestamp', inplace=True)
+        # --- OPTIMIZATION 2: PARALLEL PROCESSING ---
+        # Use joblib to process files in parallel. n_jobs=-1 uses all available CPU cores.
+        # 'delayed' wraps the function and its arguments for later execution.
+        data_frames = Parallel(n_jobs=-1)(
+            delayed(_process_single_file)(
+                file_path, 
+                column_map, 
+                target_columns, 
+                filter_weekends, 
+                filter_weeks
+            ) for file_path in files_to_process
+        )
+        # --- End of Optimization 2 ---
 
-            df_resampled = df.resample('1min').agg(lambda x: x.mode()[0] if not x.mode().empty else None)
-            df_resampled['category'] = df_resampled[inference_col_name].map(column_map.get(inference_col_name))
-            
-            daily_counts = df_resampled.groupby(df_resampled.index.date)['category'].value_counts().unstack(fill_value=0)
-            daily_counts = daily_counts.reindex(columns=target_columns, fill_value=0)
-            
-            daily_counts['user_id'] = user_number
-            daily_counts.reset_index(inplace=True)
-            daily_counts.rename(columns={'index': 'date'}, inplace=True)
-            
-            # Vectorized filtering for efficiency
-            if filter_weekends:
-                daily_counts = daily_counts[pd.to_datetime(daily_counts['date']).dt.weekday < 5]
-            if filter_weeks:
-                start_date = pd.Timestamp('2013-03-27').date()
-                end_date = pd.Timestamp('2013-05-27').date()
-                daily_counts = daily_counts[(daily_counts['date'] >= start_date) & (daily_counts['date'] <= end_date)]
-                
-            data_frames.append(daily_counts)
+        if not data_frames:
+            return pd.DataFrame() # Return empty DataFrame if no files were processed
 
         return pd.concat(data_frames, ignore_index=True)
+
 
 
     def get_activity_data(self):
@@ -587,8 +691,9 @@ class StudentLifeDataLoader(DataLoader):
                 3.0: 'individual_minutes_unknown'
             }
         }
-        target_cols = list(activity_map[' activity inference'].values())
-        
+        all_possible_cols = list(activity_map[' activity inference'].values())
+        target_cols = [col for col in all_possible_cols if 'unknown' not in col]
+
         return self._process_binned_data(
             data_path=self.config["activity_data_path"],
             column_map=activity_map,
@@ -607,7 +712,8 @@ class StudentLifeDataLoader(DataLoader):
                 3.0: 'environmental_minutes_unknown'
             }
         }
-        target_cols = list(audio_map[' audio inference'].values())
+        all_possible_cols = list(audio_map[' audio inference'].values())
+        target_cols = [col for col in all_possible_cols if 'unknown' not in col]
         
         return self._process_binned_data(
             data_path=self.config["audio_data_path"],
@@ -640,8 +746,8 @@ class StudentLifeDataLoader(DataLoader):
             daily_agg = df.groupby('date').agg(
                 organizational_social_voice_sum=('duration', 'sum'),
                 organizational_social_voice_count=('duration', 'count'),
-                organizational_social_voice_mean=('duration', 'mean'),
-                organizational_social_voice_max=('duration', 'max')
+                # organizational_social_voice_mean=('duration', 'mean'),
+                # organizational_social_voice_max=('duration', 'max')
             ).reset_index()
 
             daily_agg['user_id'] = user_number
